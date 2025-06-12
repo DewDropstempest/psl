@@ -4,9 +4,9 @@ publicsuffixlist
 [Public Suffix List](https://publicsuffix.org/) parser implementation for
 Python 3.5+.
 
-- Compliant with [TEST DATA](https://raw.githubusercontent.com/publicsuffix/list/master/tests/test_psl.txt)
+- Compliant with [TEST DATA](https://raw.githubusercontent.com/publicsuffix/list/master/tests/test_psl.txt).
 - Supports IDN (unicode and punycoded).
-- Supports Python3.5+
+- Supports Python3.5+.
 - Shipped with built-in PSL and an updater script.
 - Written in Pure Python with no library dependencies.
 
@@ -33,11 +33,11 @@ from publicsuffixlist import PublicSuffixList
 psl = PublicSuffixList()
 # Uses built-in PSL file
 
-print(psl.publicsuffix("www.example.com"))   # "com"
-# the longest public suffix part
+print(psl.publicsuffix("www.example.com")) # "com"
+# The longest public suffix part
 
-print(psl.privatesuffix("www.example.com"))  # "example.com"
-# the shortest domain assigned for a registrant
+print(psl.privatesuffix("www.example.com")) # "example.com"
+# The shortest domain assigned for a registrant
 
 print(psl.privatesuffix("com")) # None
 # Returns None if no private (non-public) part found
@@ -45,7 +45,7 @@ print(psl.privatesuffix("com")) # None
 print(psl.publicsuffix("www.example.unknownnewtld")) # "unknownnewtld"
 # New TLDs are valid public suffix by default
 
-print(psl.publicsuffix("www.example.香港")) #"香港"
+print(psl.publicsuffix("www.example.香港")) # "香港"
 # Accepts unicode
 
 print(psl.publicsuffix("www.example.xn--j6w193g")) # "xn--j6w193g"
@@ -54,7 +54,7 @@ print(psl.publicsuffix("www.example.xn--j6w193g")) # "xn--j6w193g"
 print(psl.privatesuffix("WWW.EXAMPLE.COM")) # "example.com"
 # Returns in lowercase by default
 
-print(psl.privatesuffix("WWW.EXAMPLE.COM", keep_case=True) # "EXAMPLE.COM"
+print(psl.privatesuffix("WWW.EXAMPLE.COM", keep_case=True)) # "EXAMPLE.COM"
 # kwarg `keep_case=True` to disable the case conversion
 ```
 
@@ -75,8 +75,8 @@ $ python -m publicsuffixlist.update
 Additional convenient methods:
 
 ```python
-print(psl.is_private("example.com"))  # True
-print(psl.is_public("example.com"))   # False
+print(psl.is_private("example.com")) # True
+print(psl.is_public("example.com")) # False
 print(psl.privateparts("aaa.www.example.com")) # ("aaa", "www", "example.com")
 print(psl.subdomain("aaa.www.example.com", depth=1)) # "www.example.com"
 ```
@@ -86,7 +86,7 @@ Limitation
 
 #### Domain Label Validation
 
-`publicsuffixlist` do NOT provide domain name and label validation.
+`publicsuffixlist` does NOT provide domain name and label validation.
 In the DNS protocol, most 8-bit characters are acceptable as labels of domain
 names. While ICANN-compliant registries do not accept domain names containing
 underscores (_), hostnames may include them. For example, DMARC records can
@@ -97,7 +97,7 @@ based on their specific context.
 Partially encoded (Unicode-mixed) Punycode is not supported due to very slow
 Punycode encoding/decoding and unpredictable encoding results. If you are
 unsure whether an input is valid Punycode, you should use:
-`unknowndomain.encode("idna").decode("ascii")`. This method, converting to idna
+`unknowndomain.encode("idna").decode("ascii")`. This method, converting to IDNA
 is idempotent.
 
 #### Handling Arbitrary Binary
@@ -106,13 +106,13 @@ tuple of bytes. Note that the returned bytes may include byte patterns that
 cannot be decoded or represented as a standard domain name.
 Example:
 ```python
-psl.privatesuffix((b"a.a", b"a.example\xff", b"com"))  # (b"a.example\xff", b"com")
+psl.privatesuffix((b"a.a", b"a.example\xff", b"com")) # (b"a.example\xff", b"com")
 
 # Note that IDNs must be punycoded when passed as tuple of bytes.
 psl = PublicSuffixList("例.example")
-psl.publicsuffix((b"xn--fsq", b"example"))  # (b"xn--fsq", b"example")
+psl.publicsuffix((b"xn--fsq", b"example")) # (b"xn--fsq", b"example")
 # UTF-8 encoded bytes of "例" do not match.
-psl.publicsuffix((b"\xe4\xbe\x8b", b"example"))  # (b"example",)
+psl.publicsuffix((b"\xe4\xbe\x8b", b"example")) # (b"example",)
 ```
 
 License

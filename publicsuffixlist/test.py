@@ -4,7 +4,7 @@
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# file, you can obtain one at http://mozilla.org/MPL/2.0/.
 #
 
 import os
@@ -66,8 +66,8 @@ class TestPSL(unittest.TestCase):
 
     def test_notpermitted_domain(self):
         # From the PSL definition, empty labels are not permitted.
-        # From the test_psl.txt, leading dot is not permitted.
-        # However, it seems most implementations ignore trailing dot.
+        # From the test_psl.txt, a leading dot is not permitted.
+        # However, it seems most implementations ignore the trailing dot.
 
         self.assertEqual(self.psl.suffix(".example.com"), None)
         self.assertEqual(self.psl.publicsuffix(".example.com"), None)
@@ -215,33 +215,49 @@ example
 """
         psl = PublicSuffixList(source)
         # punycoded ASCII should match
-        data = bytestuple("aaa.www.例.example".encode("idna"))
-        pubres  = data[-2:] # xn--fsq.example
-        privres = data[-3:]
-        self.assertEqual(psl.publicsuffix(data), pubres)
-        self.assertEqual(psl.privatesuffix(data), privres)
+        data = bytestuple("aaa.www.例.example".enc```python
+# -*- coding: utf-8 -*-
+#
+# Copyright 2014 ko-zu <causeless@gmail.com>
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, you can obtain one at http://mozilla.org/MPL/2.0/.
+#
 
-    def test_bytestuple_utf8(self):
-        source = """
-example
-例.example
-"""
-        psl = PublicSuffixList(source)
-        # UTF-8 encoded bytes should NOT match
-        data = bytestuple("aaa.www.例.example".encode("utf8"))
-        pubres  = data[-1:] # example
-        privres = data[-2:]
-        self.assertEqual(psl.publicsuffix(data), pubres)
-        self.assertEqual(psl.privatesuffix(data), privres)
+import os
+import re
+import unittest
 
-    def test_bytestuple_otherencoding(self):
-        source = """
-example
-例.example
-"""
-        psl = PublicSuffixList(source.splitlines())
-        # Shift_JIS encoded bytes should NOT match
-        data = bytestuple("aaa.www.例.example".encode("sjis"))
+from publicsuffixlist import PublicSuffixList, b, decode_idn, encode_idn, u
+
+def bytestuple(x):
+    return tuple(bytes(x).split(b'.'))
+
+class TestPSL(unittest.TestCase):
+
+    def setUp(self):
+        self.psl = PublicSuffixList()
+
+    def test_typesafe(self):
+        self.assertEqual(self.psl.suffix("www.example.co.jp").__class__, "example.co.jp".__class__)
+        self.assertEqual(self.psl.suffix(u("www.example.co.jp")).__class__, u("example.co.jp").__class__)
+
+        self.assertEqual(self.psl.publicsuffix("www.example.co.jp").__class__, "co.jp".__class__)
+        self.assertEqual(self.psl.publicsuffix(u("www.example.co.jp")).__class__, u("co.jp").__class__)
+
+    def test_typesafe_bytestuple(self):
+        self.assertEqual(
+                self.psl.privatesuffix((b"www",b"example",b"co",b"jp")).__class__,
+                (b"example", b"co", b"jp").__class__)
+        self.assertEqual(
+                self.psl.publicsuffix((b"www",b"example",b"co",b"jp")).__class__,
+                (b"co", b"jp").__class__)
+
+    def test_uppercase(self):
+        self.assertEqual(self.psl.suffix("Jp"), None)
+        self.assertEqual(self.psl.publicsuffix("Jp"), "jp")
+```("aaa.www.例.example".encode("sjis"))
         pubres  = data[-1:] # example
         privres = data[-2:]
         self.assertEqual(psl.publicsuffix(data), pubres)

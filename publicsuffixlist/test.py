@@ -11,7 +11,7 @@ import os
 import re
 import unittest
 
-from publicsuffixlist import PublicSuffixList, b, encode_idn, u
+from publicsuffixlist import PublicSuffixList, b, decode_idn, encode_idn, u
 
 def bytestuple(x):
     return tuple(bytes(x).split(b'.'))
@@ -430,6 +430,294 @@ class TestPSLSections(unittest.TestCase):
         psl = PublicSuffixList(only_icann=True)
         self.assertEqual(psl.publicsuffix("www.example.com"), 'com')
         self.assertEqual(psl.publicsuffix("example.priv.at"), 'at')
+
+    def test_icann_section_detection_custom_source(self):
+        # Only rules inside the ICANN section should be honoured when
+        # only_icann=True.  The "private" rule must be ignored.
+        source = (
+            "// ===BEGIN ICANN DOMAINS===\n"
+            "icann\n"
+            "// ===END ICANN DOMAINS===\n"
+            "private\n"
+        )
+        psl = PublicSuffixList(source, only_icann=True)
+        # "icann" rule was in the ICANN section → treated as explicit public suffix
+        self.assertIsNone(psl.privatesuffix("icann"))
+        self.assertEqual(psl.publicsuffix("icann"), "icann")
+        self.assertEqual(psl.publicsuffix("example.icann"), "icann")
+        self.assertEqual(psl.privatesuffix("example.icann"), "example.icann")
+        # "private" rule was outside the ICANN section → falls through to the
+        # unknown-TLD path (accept_unknown=True default), so it still acts as
+        # a public suffix but only by the unknown-TLD rule, not an explicit one.
+        self.assertEqual(psl.publicsuffix("example.private"), "private")
+        self.assertEqual(psl.privatesuffix("example.private"), "example.private")
+
+    def test_icann_no_markers(self):
+        # When the source has no ICANN section markers, only_icann=True means
+        # section_is_icann stays None (falsy) for every line → nothing is
+        # added to the suffix set, so all lookups fall back to accept_unknown.
+        source = "com\nnet\n"
+        psl = PublicSuffixList(source, only_icann=True)
+        # With accept_unknown=True (default) an unknown single-label TLD is
+        # still treated as public, so "example.com" gets a private suffix via
+        # the unknown-TLD path.
+        self.assertEqual(psl.privatesuffix("example.com"), "example.com")
+        # An explicit ICANN entry was never loaded, so "com" itself is treated
+        # as an unknown TLD (public) rather than as an explicitly listed suffix.
+        self.assertIsNone(psl.privatesuffix("com"))
+
+    def test_icann_private_domain_excluded(self):
+        # github.io is a private-section entry in the real PSL.
+        # With only_icann=True it should not be honoured as a public suffix,
+        # so "pages.github.io" should have a private suffix (via unknown-TLD
+        # fallback) rather than returning None.
+        psl = PublicSuffixList(only_icann=True)
+        result = psl.privatesuffix("pages.github.io")
+        self.assertIsNotNone(result)
+
+
+class TestHelpers(unittest.TestCase):
+
+    def test_u_function(self):
+        # bytes → str
+        self.assertEqual(u(b"hello"), "hello")
+        self.assertIsInstance(u(b"hello"), str)
+        # str passthrough
+        self.assertEqual(u("hello"), "hello")
+        self.assertIsInstance(u("hello"), str)
+
+    def test_b_function(self):
+        # str → bytes
+        self.assertEqual(b("hello"), b"hello")
+        self.assertIsInstance(b("hello"), bytes)
+        # bytes passthrough
+        self.assertEqual(b(b"hello"), b"hello")
+        self.assertIsInstance(b(b"hello"), bytes)
+        # bytearray → bytes
+        self.assertEqual(b(bytearray(b"hello")), b"hello")
+        self.assertIsInstance(b(bytearray(b"hello")), bytes)
+
+    def test_encode_idn(self):
+        result = encode_idn(u("例.jp"))
+        # Must be pure ASCII (punycode)
+        result.encode("ascii")
+        self.assertIn("jp", result)
+        self.assertNotIn("例", result)
+
+    def test_decode_idn(self):
+        original = u("例.jp")
+        encoded = encode_idn(original)
+        self.assertEqual(decode_idn(encoded), original)
+
+    def test_decode_idn_invalid(self):
+        # Invalid punycode must raise UnicodeError rather than silently produce
+        # a meaningless result.
+        self.assertRaises(UnicodeError, lambda: decode_idn("xn--invalid-punycode-zzzzzz.jp"))
+
+
+class TestConstructorOptions(unittest.TestCase):
+
+    def test_accept_encoded_idn_false(self):
+        # With accept_encoded_idn=False the punycode variant of an IDN rule is
+        # NOT added to the suffix set, so a punycoded domain that matches the
+        # IDN rule should fall back to the unknown-TLD path instead of being
+        # treated as a known public suffix in the usual way.
+        source = u("例.jp\n")
+        psl_with = PublicSuffixList(source, accept_encoded_idn=True)
+        psl_without = PublicSuffixList(source, accept_encoded_idn=False)
+
+        puny_tld = encode_idn(u("例.jp"))  # e.g. "xn--fsq.jp"
+        domain = "test." + puny_tld       # e.g. "test.xn--fsq.jp"
+
+        # With encoding enabled the punycoded rule is loaded → private suffix
+        # has exactly one private label.
+        self.assertEqual(psl_with.privatesuffix(domain), domain)
+
+        # Without encoding the punycoded rule is absent → only the base "jp"
+        # rule (via unknown TLD fallback or explicit jp) applies, so the
+        # private suffix includes more of the domain.
+        result_without = psl_without.privatesuffix(domain)
+        self.assertNotEqual(result_without, domain)
+
+
+class TestIsPrivatePublicEdgeCases(unittest.TestCase):
+
+    def setUp(self):
+        self.psl = PublicSuffixList()
+
+    def test_is_private_invalid_domain(self):
+        self.assertFalse(self.psl.is_private(".bad"))
+        self.assertFalse(self.psl.is_private(""))
+        self.assertFalse(self.psl.is_private("www..invalid"))
+
+    def test_is_public_invalid_domain(self):
+        self.assertFalse(self.psl.is_public(".bad"))
+        self.assertFalse(self.psl.is_public(""))
+        self.assertFalse(self.psl.is_public("www..invalid"))
+
+    def test_is_private_unknown_tld(self):
+        # Two-label domain under unknown TLD → private (registrable)
+        self.assertTrue(self.psl.is_private("example.unknowntld"))
+        # Three-label domain under unknown TLD → still private
+        self.assertTrue(self.psl.is_private("sub.example.unknowntld"))
+
+    def test_is_public_unknown_tld(self):
+        # Single unknown TLD → public
+        self.assertTrue(self.psl.is_public("unknowntld"))
+        # Two-label domain under unknown TLD → not public
+        self.assertFalse(self.psl.is_public("example.unknowntld"))
+
+    def test_is_private_is_public_trailing_dot(self):
+        # Trailing dot is ignored; domain reduces to valid form
+        self.assertTrue(self.psl.is_private("example.com."))
+        self.assertFalse(self.psl.is_public("example.com."))
+
+    def test_is_public_known_tld(self):
+        self.assertTrue(self.psl.is_public("com"))
+        self.assertTrue(self.psl.is_public("co.jp"))
+        self.assertFalse(self.psl.is_public("example.com"))
+
+
+class TestPrivatepartsBytestuple(unittest.TestCase):
+
+    def setUp(self):
+        self.psl = PublicSuffixList()
+
+    def test_privateparts_bytestuple_basic(self):
+        data = (b"www", b"example", b"com")
+        result = self.psl.privateparts(data)
+        # subdomain labels + private suffix tuple
+        self.assertEqual(result, (b"www", (b"example", b"com")))
+
+    def test_privateparts_bytestuple_no_subdomain(self):
+        data = (b"example", b"com")
+        result = self.psl.privateparts(data)
+        self.assertEqual(result, ((b"example", b"com"),))
+
+    def test_privateparts_bytestuple_keepcase(self):
+        data = (b"Www", b"Example", b"Com")
+        result = self.psl.privateparts(data, keep_case=True)
+        self.assertEqual(result, (b"Www", (b"Example", b"Com")))
+
+    def test_privateparts_bytestuple_none(self):
+        # public suffix only → no private part
+        data = (b"com",)
+        self.assertIsNone(self.psl.privateparts(data))
+
+
+class TestSubdomainBytestuple(unittest.TestCase):
+
+    def setUp(self):
+        self.psl = PublicSuffixList()
+
+    def test_subdomain_bytestuple_depth0(self):
+        data = (b"aaa", b"www", b"example", b"com")
+        result = self.psl.subdomain(data, depth=0)
+        self.assertEqual(result, (b"example", b"com"))
+
+    def test_subdomain_bytestuple_depth1(self):
+        data = (b"aaa", b"www", b"example", b"com")
+        result = self.psl.subdomain(data, depth=1)
+        self.assertEqual(result, (b"www", b"example", b"com"))
+
+    def test_subdomain_bytestuple_overflow(self):
+        data = (b"example", b"com")
+        # depth=1 requires at least 3 labels (publen=1 + 1 private + 1 sub)
+        self.assertIsNone(self.psl.subdomain(data, depth=1))
+
+    def test_subdomain_bytestuple_public_only(self):
+        data = (b"com",)
+        self.assertIsNone(self.psl.subdomain(data, depth=0))
+
+
+class TestBytearrayTypeError(unittest.TestCase):
+
+    def setUp(self):
+        self.psl = PublicSuffixList()
+
+    def test_bytearray_raises_typeerror(self):
+        self.assertRaises(TypeError, lambda: self.psl.suffix(bytearray(b"example.com")))
+
+    def test_bytearray_publicsuffix_raises_typeerror(self):
+        self.assertRaises(TypeError, lambda: self.psl.publicsuffix(bytearray(b"example.com")))
+
+    def test_bytearray_privatesuffix_raises_typeerror(self):
+        self.assertRaises(TypeError, lambda: self.psl.privatesuffix(bytearray(b"example.com")))
+
+
+class TestWildcardAcceptUnknown(unittest.TestCase):
+
+    def setUp(self):
+        source = "*.bd\n"
+        # accept_unknown=True is the default; test it explicitly as well
+        self.psl = PublicSuffixList(source.splitlines(), accept_unknown=True)
+
+    def test_bare_tld_is_public(self):
+        self.assertEqual(self.psl.publicsuffix("bd"), "bd")
+        self.assertIsNone(self.psl.privatesuffix("bd"))
+
+    def test_one_label_under_wildcard_is_public(self):
+        # "example.bd" matches *.bd → example.bd is public suffix
+        self.assertEqual(self.psl.publicsuffix("example.bd"), "example.bd")
+        self.assertIsNone(self.psl.privatesuffix("example.bd"))
+
+    def test_two_labels_under_wildcard_has_private(self):
+        self.assertEqual(self.psl.publicsuffix("sub.example.bd"), "example.bd")
+        self.assertEqual(self.psl.privatesuffix("sub.example.bd"), "sub.example.bd")
+
+
+class TestCompatEdgeCases(unittest.TestCase):
+
+    def setUp(self):
+        from publicsuffixlist.compat import PublicSuffixList, UnsafePublicSuffixList
+        self.psl = PublicSuffixList()
+        self.upsl = UnsafePublicSuffixList()
+
+    def test_compat_unknown_tld(self):
+        self.assertEqual(self.psl.get_public_suffix("example.unknowntld"), "example.unknowntld")
+
+    def test_compat_invalid_domain(self):
+        self.assertEqual(self.psl.get_public_suffix(".bad"), "")
+
+    def test_compat_empty_string(self):
+        self.assertEqual(self.psl.get_public_suffix(""), "")
+
+    def test_compat_very_long_domain(self):
+        d = "a." * 1000 + "example.com"
+        self.assertEqual(self.psl.get_public_suffix(d), "example.com")
+
+    def test_unsafe_compat_fallback_public_suffix(self):
+        # When privatesuffix is None (e.g. bare TLD), UnsafePublicSuffixList
+        # falls back to returning the publicsuffix instead.
+        self.assertEqual(self.upsl.get_public_suffix("com"), "com")
+
+    def test_unsafe_compat_private_domain(self):
+        self.assertEqual(self.upsl.get_public_suffix("test.example.com"), "example.com")
+
+    def test_unsafe_compat_invalid_domain(self):
+        self.assertEqual(self.upsl.get_public_suffix(".bad"), "")
+
+    def test_unsafe_compat_empty_string(self):
+        self.assertEqual(self.upsl.get_public_suffix(""), "")
+
+
+class TestLargePSLSource(unittest.TestCase):
+
+    def test_many_rules_parsing(self):
+        # Build a PSL with thousands of rules and verify lookups stay correct.
+        lines = ["// ===BEGIN ICANN DOMAINS==="]
+        lines += ["rule{0}.example".format(i) for i in range(500)]
+        lines += ["// ===END ICANN DOMAINS==="]
+        lines += ["com"]
+        source = "\n".join(lines)
+        psl = PublicSuffixList(source)
+        # An explicitly listed suffix should be recognised
+        self.assertIsNone(psl.privatesuffix("rule42.example"))
+        self.assertEqual(psl.publicsuffix("rule42.example"), "rule42.example")
+        # A sub-domain of that rule should be private
+        self.assertEqual(psl.privatesuffix("sub.rule42.example"), "sub.rule42.example")
+        # Standard TLD still works
+        self.assertEqual(psl.privatesuffix("example.com"), "example.com")
 
 
 if __name__ == "__main__":

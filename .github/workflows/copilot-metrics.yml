@@ -1,0 +1,105 @@
+name: Copilot Metrics Collector
+
+on:
+  schedule:
+    # Runs every day at 06:00 UTC (after GitHub's nightly data refresh)
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    # Also allows manual triggering from the Actions tab
+
+permissions:
+  contents: write  # needed to commit the updated metrics file back to the repo
+
+jobs:
+  fetch-metrics:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3"
+
+      - name: Fetch Copilot usage metrics
+        env:
+          COPILOT_METRICS_TOKEN: ${{ secrets.COPILOT_METRICS_TOKEN }}
+          ORG: DewDropstempest
+        run: |
+          python - <<'PYEOF'
+          import json
+          import os
+          import urllib.request
+          import urllib.error
+          from datetime import datetime, timezone
+
+          token = os.environ["COPILOT_METRICS_TOKEN"]
+          org   = os.environ["ORG"]
+
+          url = f"https://api.github.com/orgs/{org}/copilot/usage"
+
+          req = urllib.request.Request(
+              url,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+
+          try:
+              with urllib.request.urlopen(req) as resp:
+                  data = json.loads(resp.read().decode())
+          except urllib.error.HTTPError as e:
+              body = e.read().decode()
+              print(f"HTTP {e.code}: {body}")
+              raise SystemExit(f"Failed to fetch metrics: {e.code}")
+
+          # ── Normalise field names ──────────────────────────────────────────
+          # The API returns either the v1 shape (total_suggestions_count, etc.)
+          # or the v2 shape (totals.suggestions, etc.).  We normalise to v1.
+          normalised = []
+          for day in data:
+              entry = {"day": day.get("day", day.get("date", "unknown"))}
+              if "total_suggestions_count" in day:
+                  # v1 shape – already in the format we want
+                  entry["total_active_users"]      = day.get("total_active_users", 0)
+                  entry["total_suggestions_count"] = day.get("total_suggestions_count", 0)
+                  entry["total_acceptances_count"] = day.get("total_acceptances_count", 0)
+                  entry["total_lines_suggested"]   = day.get("total_lines_suggested", 0)
+                  entry["total_lines_accepted"]    = day.get("total_lines_accepted", 0)
+              elif "copilot_ide_code_completions" in day:
+                  # v2 / newer shape
+                  cc = day.get("copilot_ide_code_completions") or {}
+                  entry["total_active_users"]      = day.get("total_active_users", 0)
+                  entry["total_suggestions_count"] = cc.get("total_suggestions_count", 0)
+                  entry["total_acceptances_count"] = cc.get("total_acceptances_count", 0)
+                  entry["total_lines_suggested"]   = cc.get("total_lines_suggested", 0)
+                  entry["total_lines_accepted"]    = cc.get("total_lines_accepted", 0)
+              else:
+                  # Fallback – store whatever we got so the dashboard can adapt
+                  entry.update({k: v for k, v in day.items() if k != "breakdown"})
+              normalised.append(entry)
+
+          out_path = "copilot-dashboard/data/metrics.json"
+          os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+          with open(out_path, "w") as f:
+              json.dump(normalised, f, indent=2)
+
+          print(f"Wrote {len(normalised)} day(s) of metrics to {out_path}")
+          PYEOF
+
+      - name: Commit updated metrics
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add copilot-dashboard/data/metrics.json
+          if git diff --cached --quiet; then
+            echo "No changes to metrics data – skipping commit."
+          else
+            git commit -m "chore: update Copilot metrics [skip ci]"
+            git push
+          fi

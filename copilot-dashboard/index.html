@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Copilot Metrics Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+
+    header svg { flex-shrink: 0; }
+
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #f0f6fc;
+    }
+
+    header p {
+      font-size: 0.85rem;
+      color: #8b949e;
+      margin-top: 2px;
+    }
+
+    #last-updated {
+      margin-left: auto;
+      font-size: 0.8rem;
+      color: #8b949e;
+      text-align: right;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .kpi {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .kpi .label {
+      font-size: 0.75rem;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .kpi .value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #58a6ff;
+    }
+
+    .kpi .sub {
+      font-size: 0.78rem;
+      color: #8b949e;
+      margin-top: 4px;
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+      gap: 20px;
+    }
+
+    .chart-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .chart-card h2 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #c9d1d9;
+      margin-bottom: 16px;
+    }
+
+    .chart-card canvas { max-height: 260px; }
+
+    #no-data {
+      display: none;
+      text-align: center;
+      padding: 60px 20px;
+      color: #8b949e;
+    }
+
+    #no-data h2 { font-size: 1.1rem; margin-bottom: 8px; color: #c9d1d9; }
+    #no-data p  { font-size: 0.875rem; line-height: 1.6; }
+    #no-data code {
+      background: #21262d;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.85em;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2z" fill="#238636"/>
+    <path d="M8.5 11.5a1 1 0 100-2 1 1 0 000 2zm7 0a1 1 0 100-2 1 1 0 000 2z" fill="#fff"/>
+    <path d="M8.964 15.5c.55.614 1.528 1 2.536 1s1.986-.386 2.536-1" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/>
+  </svg>
+  <div>
+    <h1>GitHub Copilot Metrics</h1>
+    <p>DewDropstempest organization · Daily usage data</p>
+  </div>
+  <div id="last-updated">
+    <div>Last updated</div>
+    <div id="updated-time">—</div>
+  </div>
+</header>
+
+<div id="no-data">
+  <h2>No data yet</h2>
+  <p>
+    The dashboard will populate automatically after the first scheduled run of the<br>
+    <code>Copilot Metrics Collector</code> GitHub Actions workflow.<br><br>
+    You can also trigger it manually: <strong>Actions → Copilot Metrics Collector → Run workflow</strong>.
+  </p>
+</div>
+
+<div id="dashboard" style="display:none">
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="label">Peak Active Users</div>
+      <div class="value" id="kpi-users">—</div>
+      <div class="sub">highest single day</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Total Suggestions</div>
+      <div class="value" id="kpi-suggestions">—</div>
+      <div class="sub">across all tracked days</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Total Acceptances</div>
+      <div class="value" id="kpi-acceptances">—</div>
+      <div class="sub">accepted suggestions</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Avg Acceptance Rate</div>
+      <div class="value" id="kpi-rate">—</div>
+      <div class="sub">acceptances / suggestions</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Lines Accepted</div>
+      <div class="value" id="kpi-lines">—</div>
+      <div class="sub">total lines of code accepted</div>
+    </div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="chart-card">
+      <h2>Active Users per Day</h2>
+      <canvas id="chart-users"></canvas>
+    </div>
+    <div class="chart-card">
+      <h2>Suggestions vs Acceptances</h2>
+      <canvas id="chart-sugg"></canvas>
+    </div>
+    <div class="chart-card">
+      <h2>Acceptance Rate (%)</h2>
+      <canvas id="chart-rate"></canvas>
+    </div>
+    <div class="chart-card">
+      <h2>Lines Suggested vs Accepted</h2>
+      <canvas id="chart-lines"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+const CHART_DEFAULTS = {
+  responsive: true,
+  maintainAspectRatio: true,
+  plugins: { legend: { labels: { color: '#8b949e', boxWidth: 12 } } },
+  scales: {
+    x: { ticks: { color: '#8b949e', maxTicksLimit: 10 }, grid: { color: '#21262d' } },
+    y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, beginAtZero: true }
+  }
+};
+
+function fmt(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000)     return (n / 1_000).toFixed(1) + 'k';
+  return String(n);
+}
+
+function makeLine(ctx, labels, datasets) {
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: { ...CHART_DEFAULTS }
+  });
+}
+
+function lineDs(label, data, color) {
+  return {
+    label,
+    data,
+    borderColor: color,
+    backgroundColor: color + '22',
+    fill: true,
+    tension: 0.3,
+    pointRadius: 3,
+  };
+}
+
+async function init() {
+  const res  = await fetch('./data/metrics.json');
+  const days = await res.json();
+
+  if (!Array.isArray(days) || days.length === 0) {
+    document.getElementById('no-data').style.display = 'block';
+    return;
+  }
+
+  document.getElementById('dashboard').style.display = 'block';
+
+  // Sort by date ascending
+  days.sort((a, b) => a.day.localeCompare(b.day));
+
+  const labels      = days.map(d => d.day);
+  const users       = days.map(d => d.total_active_users ?? 0);
+  const suggestions = days.map(d => d.total_suggestions_count ?? 0);
+  const acceptances = days.map(d => d.total_acceptances_count ?? 0);
+  const linesSugg   = days.map(d => d.total_lines_suggested ?? 0);
+  const linesAcc    = days.map(d => d.total_lines_accepted ?? 0);
+  const rates       = suggestions.map((s, i) =>
+    s > 0 ? +((acceptances[i] / s) * 100).toFixed(1) : 0
+  );
+
+  // KPIs
+  const totalSugg = suggestions.reduce((a, b) => a + b, 0);
+  const totalAcc  = acceptances.reduce((a, b) => a + b, 0);
+  const avgRate   = totalSugg > 0 ? ((totalAcc / totalSugg) * 100).toFixed(1) : '—';
+  document.getElementById('kpi-users').textContent       = fmt(Math.max(...users));
+  document.getElementById('kpi-suggestions').textContent = fmt(totalSugg);
+  document.getElementById('kpi-acceptances').textContent = fmt(totalAcc);
+  document.getElementById('kpi-rate').textContent        = avgRate + '%';
+  document.getElementById('kpi-lines').textContent       = fmt(linesAcc.reduce((a, b) => a + b, 0));
+
+  // Updated time
+  document.getElementById('updated-time').textContent = labels[labels.length - 1] ?? '—';
+
+  // Charts
+  makeLine(document.getElementById('chart-users'), labels, [
+    lineDs('Active Users', users, '#58a6ff')
+  ]);
+
+  makeLine(document.getElementById('chart-sugg'), labels, [
+    lineDs('Suggestions', suggestions, '#3fb950'),
+    lineDs('Acceptances', acceptances, '#58a6ff'),
+  ]);
+
+  makeLine(document.getElementById('chart-rate'), labels, [
+    lineDs('Acceptance Rate %', rates, '#e3b341')
+  ]);
+
+  makeLine(document.getElementById('chart-lines'), labels, [
+    lineDs('Lines Suggested', linesSugg, '#3fb950'),
+    lineDs('Lines Accepted',  linesAcc,  '#58a6ff'),
+  ]);
+}
+
+init().catch(err => {
+  console.error('Dashboard error:', err);
+  document.getElementById('no-data').style.display = 'block';
+});
+</script>
+</body>
+</html>

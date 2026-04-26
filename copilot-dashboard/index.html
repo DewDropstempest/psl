@@ -326,10 +326,18 @@ function setStatusBar(latestDay) {
 
   bar.style.display = 'flex';
 
+  const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  if (!ISO_DATE_RE.test(latestDay)) {
+    dot.className      = 'status-dot yellow';
+    text.textContent   = 'Unknown data age';
+    detail.textContent = `Latest entry: ${latestDay}`;
+    return;
+  }
+
   const latest = new Date(latestDay + 'T00:00:00Z');
   if (isNaN(latest.getTime())) {
-    dot.className    = 'status-dot yellow';
-    text.textContent = 'Unknown data age';
+    dot.className      = 'status-dot yellow';
+    text.textContent   = 'Unknown data age';
     detail.textContent = `Latest entry: ${latestDay}`;
     return;
   }

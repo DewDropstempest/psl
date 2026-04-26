@@ -74,25 +74,52 @@ jobs:
               elif "copilot_ide_code_completions" in day:
                   # v2 / newer shape
                   cc = day.get("copilot_ide_code_completions") or {}
-                  entry["total_active_users"]      = day.get("total_active_users", 0)
-                  entry["total_suggestions_count"] = cc.get("total_suggestions_count", 0)
-                  entry["total_acceptances_count"] = cc.get("total_acceptances_count", 0)
-                  entry["total_lines_suggested"]   = cc.get("total_lines_suggested", 0)
-                  entry["total_lines_accepted"]    = cc.get("total_lines_accepted", 0)
-                  # Normalise v2 breakdown into the same shape as v1
+                  entry["total_active_users"] = day.get("total_active_users", 0)
+                  # Normalise v2 breakdown into the same shape as v1.
+                  # Stats may be on the editor entry directly OR nested one level
+                  # deeper under models[].languages[]; prefer the latter when present.
                   breakdown = []
                   for lang_entry in (cc.get("languages") or []):
                       for editor_entry in (lang_entry.get("editors") or []):
+                          models = editor_entry.get("models") or []
+                          if models:
+                              # Aggregate across all models and their per-language rows
+                              sugg = acc = ls = la = users = 0
+                              for model in models:
+                                  for mlang in (model.get("languages") or []):
+                                      sugg  += mlang.get("total_code_suggestions", 0)
+                                      acc   += mlang.get("total_code_acceptances", 0)
+                                      ls    += mlang.get("total_code_lines_suggested", 0)
+                                      la    += mlang.get("total_code_lines_accepted", 0)
+                                  users += model.get("total_engaged_users", 0)
+                          else:
+                              # Stats sit directly on the editor entry (intermediate v2 shape)
+                              sugg  = editor_entry.get("total_suggestions_count",
+                                      editor_entry.get("total_code_suggestions", 0))
+                              acc   = editor_entry.get("total_acceptances_count",
+                                      editor_entry.get("total_code_acceptances", 0))
+                              ls    = editor_entry.get("total_lines_suggested",
+                                      editor_entry.get("total_code_lines_suggested", 0))
+                              la    = editor_entry.get("total_lines_accepted",
+                                      editor_entry.get("total_code_lines_accepted", 0))
+                              users = editor_entry.get("total_engaged_users",
+                                      editor_entry.get("total_active_users", 0))
                           breakdown.append({
-                              "language":         lang_entry.get("name", "unknown"),
-                              "editor":           editor_entry.get("name", "unknown"),
-                              "suggestions_count": editor_entry.get("total_suggestions_count", 0),
-                              "acceptances_count": editor_entry.get("total_acceptances_count", 0),
-                              "lines_suggested":   editor_entry.get("total_lines_suggested", 0),
-                              "lines_accepted":    editor_entry.get("total_lines_accepted", 0),
-                              "active_users":      editor_entry.get("total_active_users", 0),
+                              "language":          lang_entry.get("name", "unknown"),
+                              "editor":            editor_entry.get("name", "unknown"),
+                              "suggestions_count": sugg,
+                              "acceptances_count": acc,
+                              "lines_suggested":   ls,
+                              "lines_accepted":    la,
+                              "active_users":      users,
                           })
                   entry["breakdown"] = breakdown
+                  # Derive top-level totals by summing the breakdown entries;
+                  # v2 does not expose these counts at the copilot_ide_code_completions level.
+                  entry["total_suggestions_count"] = sum(b["suggestions_count"] for b in breakdown)
+                  entry["total_acceptances_count"] = sum(b["acceptances_count"] for b in breakdown)
+                  entry["total_lines_suggested"]   = sum(b["lines_suggested"]   for b in breakdown)
+                  entry["total_lines_accepted"]    = sum(b["lines_accepted"]    for b in breakdown)
               else:
                   # Fallback – store whatever we got so the dashboard can adapt
                   entry.update({k: v for k, v in day.items()})

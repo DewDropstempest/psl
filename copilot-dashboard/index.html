@@ -115,6 +115,46 @@
       border-radius: 4px;
       font-size: 0.85em;
     }
+
+    /* Status bar */
+    #status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 10px 16px;
+      margin-bottom: 24px;
+      font-size: 0.82rem;
+      color: #8b949e;
+    }
+
+    #status-bar .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    #status-bar .status-dot.green  { background: #3fb950; box-shadow: 0 0 6px #3fb950aa; }
+    #status-bar .status-dot.yellow { background: #e3b341; box-shadow: 0 0 6px #e3b341aa; }
+    #status-bar .status-dot.red    { background: #f85149; box-shadow: 0 0 6px #f85149aa; }
+
+    #status-bar .status-text { color: #c9d1d9; font-weight: 500; }
+    #status-bar .status-sep  { color: #30363d; }
+
+    /* Section headings */
+    .section-heading {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #8b949e;
+      margin: 32px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #21262d;
+    }
   </style>
 </head>
 <body>
@@ -142,6 +182,13 @@
     <code>Copilot Metrics Collector</code> GitHub Actions workflow.<br><br>
     You can also trigger it manually: <strong>Actions → Copilot Metrics Collector → Run workflow</strong>.
   </p>
+</div>
+
+<div id="status-bar" style="display:none">
+  <span class="status-dot" id="status-dot"></span>
+  <span class="status-text" id="status-text"></span>
+  <span class="status-sep">·</span>
+  <span id="status-detail"></span>
 </div>
 
 <div id="dashboard" style="display:none">
@@ -191,6 +238,20 @@
       <canvas id="chart-lines"></canvas>
     </div>
   </div>
+
+  <div id="breakdown-section" style="display:none">
+    <div class="section-heading">Developer Breakdown</div>
+    <div class="charts-grid">
+      <div class="chart-card">
+        <h2>Acceptances by Language</h2>
+        <canvas id="chart-lang"></canvas>
+      </div>
+      <div class="chart-card">
+        <h2>Acceptances by Editor</h2>
+        <canvas id="chart-editor"></canvas>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -200,6 +261,16 @@ const CHART_DEFAULTS = {
   plugins: { legend: { labels: { color: '#8b949e', boxWidth: 12 } } },
   scales: {
     x: { ticks: { color: '#8b949e', maxTicksLimit: 10 }, grid: { color: '#21262d' } },
+    y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, beginAtZero: true }
+  }
+};
+
+const BAR_DEFAULTS = {
+  responsive: true,
+  maintainAspectRatio: true,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
     y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, beginAtZero: true }
   }
 };
@@ -218,6 +289,23 @@ function makeLine(ctx, labels, datasets) {
   });
 }
 
+function makeBar(ctx, labels, values, color) {
+  return new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: color + 'cc',
+        borderColor: color,
+        borderWidth: 1,
+        borderRadius: 4,
+      }]
+    },
+    options: { ...BAR_DEFAULTS }
+  });
+}
+
 function lineDs(label, data, color) {
   return {
     label,
@@ -228,6 +316,70 @@ function lineDs(label, data, color) {
     tension: 0.3,
     pointRadius: 3,
   };
+}
+
+function setStatusBar(latestDay) {
+  const bar   = document.getElementById('status-bar');
+  const dot   = document.getElementById('status-dot');
+  const text  = document.getElementById('status-text');
+  const detail = document.getElementById('status-detail');
+
+  bar.style.display = 'flex';
+
+  const now      = new Date();
+  const latest   = new Date(latestDay + 'T00:00:00Z');
+  const diffDays = Math.floor((now - latest) / 86_400_000);
+
+  if (diffDays <= 1) {
+    dot.className  = 'status-dot green';
+    text.textContent = 'Data current';
+    detail.textContent = `Latest entry: ${latestDay}`;
+  } else if (diffDays <= 3) {
+    dot.className  = 'status-dot yellow';
+    text.textContent = 'Data slightly stale';
+    detail.textContent = `Latest entry: ${latestDay} (${diffDays} days ago) — workflow may not have run yet today`;
+  } else {
+    dot.className  = 'status-dot red';
+    text.textContent = 'Data stale';
+    detail.textContent = `Latest entry: ${latestDay} (${diffDays} days ago) — check the Copilot Metrics Collector workflow`;
+  }
+}
+
+function renderBreakdown(days) {
+  // Aggregate breakdown across all days
+  const byLang   = {};
+  const byEditor = {};
+
+  for (const day of days) {
+    for (const b of (day.breakdown || [])) {
+      const lang = b.language || 'unknown';
+      const ed   = b.editor   || 'unknown';
+      byLang[lang]   = (byLang[lang]   || 0) + (b.acceptances_count || 0);
+      byEditor[ed]   = (byEditor[ed]   || 0) + (b.acceptances_count || 0);
+    }
+  }
+
+  if (Object.keys(byLang).length === 0) return;
+
+  document.getElementById('breakdown-section').style.display = 'block';
+
+  // Sort descending, take top 10
+  const topLangs   = Object.entries(byLang).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const topEditors = Object.entries(byEditor).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+  makeBar(
+    document.getElementById('chart-lang'),
+    topLangs.map(e => e[0]),
+    topLangs.map(e => e[1]),
+    '#3fb950'
+  );
+
+  makeBar(
+    document.getElementById('chart-editor'),
+    topEditors.map(e => e[0]),
+    topEditors.map(e => e[1]),
+    '#58a6ff'
+  );
 }
 
 async function init() {
@@ -253,6 +405,9 @@ async function init() {
   const rates       = suggestions.map((s, i) =>
     s > 0 ? +((acceptances[i] / s) * 100).toFixed(1) : 0
   );
+
+  // Status bar
+  setStatusBar(labels[labels.length - 1]);
 
   // KPIs
   const totalSugg = suggestions.reduce((a, b) => a + b, 0);
@@ -285,6 +440,9 @@ async function init() {
     lineDs('Lines Suggested', linesSugg, '#3fb950'),
     lineDs('Lines Accepted',  linesAcc,  '#58a6ff'),
   ]);
+
+  // Developer breakdown (language + editor)
+  renderBreakdown(days);
 }
 
 init().catch(err => {

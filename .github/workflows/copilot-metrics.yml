@@ -70,6 +70,7 @@ jobs:
                   entry["total_acceptances_count"] = day.get("total_acceptances_count", 0)
                   entry["total_lines_suggested"]   = day.get("total_lines_suggested", 0)
                   entry["total_lines_accepted"]    = day.get("total_lines_accepted", 0)
+                  entry["breakdown"]               = day.get("breakdown", [])
               elif "copilot_ide_code_completions" in day:
                   # v2 / newer shape
                   cc = day.get("copilot_ide_code_completions") or {}
@@ -78,9 +79,23 @@ jobs:
                   entry["total_acceptances_count"] = cc.get("total_acceptances_count", 0)
                   entry["total_lines_suggested"]   = cc.get("total_lines_suggested", 0)
                   entry["total_lines_accepted"]    = cc.get("total_lines_accepted", 0)
+                  # Normalise v2 breakdown into the same shape as v1
+                  breakdown = []
+                  for lang_entry in (cc.get("languages") or []):
+                      for editor_entry in (lang_entry.get("editors") or []):
+                          breakdown.append({
+                              "language":         lang_entry.get("name", "unknown"),
+                              "editor":           editor_entry.get("name", "unknown"),
+                              "suggestions_count": editor_entry.get("total_suggestions_count", 0),
+                              "acceptances_count": editor_entry.get("total_acceptances_count", 0),
+                              "lines_suggested":   editor_entry.get("total_lines_suggested", 0),
+                              "lines_accepted":    editor_entry.get("total_lines_accepted", 0),
+                              "active_users":      editor_entry.get("total_active_users", 0),
+                          })
+                  entry["breakdown"] = breakdown
               else:
                   # Fallback – store whatever we got so the dashboard can adapt
-                  entry.update({k: v for k, v in day.items() if k != "breakdown"})
+                  entry.update({k: v for k, v in day.items()})
               normalised.append(entry)
 
           out_path = "copilot-dashboard/data/metrics.json"
